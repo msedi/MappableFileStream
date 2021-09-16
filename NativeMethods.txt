@@ -1,0 +1,2 @@
+﻿CreateMemoryResourceNotification
+SetFileValidData

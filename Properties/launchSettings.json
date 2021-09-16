@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "MemoryMapFile": {
+      "commandName": "Project",
+      "nativeDebugging": false
+    }
+  }
+}
