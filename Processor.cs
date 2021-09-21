@@ -7,9 +7,9 @@ using System.IO;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 
-namespace MemoryMapFile
+namespace MappableFileStream
 {
-    unsafe class Processor: DataSource
+    unsafe class Processor : DataSource
     {
         DataSource InputVolume;
         Volume OutputVolume;
@@ -23,48 +23,18 @@ namespace MemoryMapFile
             SizeZ = inputVolume.SizeZ;
         }
 
-        
-        public override ReadOnlySpan<int> getVolume(int sliceIndex)
+
+        public override ReadOnlySpan<int> GetData(int sliceIndex)
         {
-            int[] data = new int[InputVolume.SizeX* InputVolume.SizeY];
-            var inputData = InputVolume.getVolume(sliceIndex);
+            var inputData = InputVolume.GetData(sliceIndex);
+            var outputData = OutputVolume.GetWriteHandle(sliceIndex);
 
-            for (int i = 0; i < data.Length; i++)
+            for (int i = 0; i < inputData.Length; i++)
             {
-
-                //data[i] = Add(inputData, i);
-                
-                data[i] = inputData[i] + 10;
-
-                //IntPtr hglobal = Marshal.AllocHGlobal(2048);
-                //Marshal.FreeHGlobal(hglobal);
-
+                outputData[i] = inputData[i] + 10;
             }
-
-            OutputVolume.setVolume(sliceIndex, data);
-            return data;
+            
+            return outputData;
         }
-
-
-
-        //public IntPtr* Add (ReadOnlySpan<int> input, int i)
-        //{
-        //    int sizea = (Marshal.SizeOf(typeof(IntPtr)));
-        //    IntPtr* result = Marshal.AllocHGlobal(sizea);
-        //    int x = input[i] + 10;
-        //    Marshal.WriteIntPtr(result, (IntPtr)x);
-        //    Console.WriteLine(result);
-        //    return *result;
-        //}
-
-        //public int Add(ReadOnlySpan<int> input, int i)
-        //{
-        //    int* p = null;
-        //    int x = 0;
-        //    x = new int;
-        //    x = input[i] + 10;
-        //    p = &x;
-        //    return *p;
-        //}
     }
 }

@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using System.IO;
 using System.Runtime.InteropServices;
 
-namespace MemoryMapFile
+namespace MappableFileStream
 {
     abstract class DataSource
     {
@@ -18,16 +18,16 @@ namespace MemoryMapFile
         {
         }
 
-        abstract public ReadOnlySpan<int> getVolume(int sliceIndex);
+        abstract public ReadOnlySpan<int> GetData(int sliceIndex);
 
         public void SaveToFile(string fileName)
         {
             using var stream = File.Create(fileName);
-            stream.SetLength((long)SizeX * SizeY * SizeZ * (long)sizeof(int));
+            stream.SetLength((long)SizeX * SizeY * SizeZ * sizeof(int));
 
             for (int z = 0; z < SizeZ; z++)
             {
-                var span = getVolume(z);
+                var span = GetData(z);
 
                 var spantowrite = MemoryMarshal.Cast<int, byte>(span);
                 stream.Write(spantowrite);
