@@ -7,6 +7,7 @@ using System.Runtime;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Tasks;
 
 using static MappableFileStream.HybridHelper;
 
@@ -22,7 +23,8 @@ namespace MappableFileStream
         /// </summary>
         readonly static ConditionalWeakTable<IReadOnlyMappableFileStream, object> Streams = new();
 
-        static IntPtr LowMemResourceHandle;
+        static IntPtr LoMemResourceHandle;
+        static IntPtr HiMemResourceHandle;
         static ulong MaxAvailableMemory;
 
         internal static readonly ManualResetEventSlim FlushWaitHandle = new(true);
@@ -48,6 +50,8 @@ namespace MappableFileStream
 
         static Thread MemoryThread;
 
+        public static void FlushWait() => FlushWaitHandle.Wait();
+
         /// <summary>
         /// Adds a stream being managed by the <see cref="MappableFileStreamManager"/>.
         /// </summary>
@@ -59,11 +63,12 @@ namespace MappableFileStream
                 Streams.Add(stream, null);
 
                 // We need to check if the thread is running.
-                if (LowMemResourceHandle == IntPtr.Zero)
+                if (LoMemResourceHandle == IntPtr.Zero)
                 {
                     AppDomain.CurrentDomain.ProcessExit += CurrentDomain_ProcessExit;
 
-                    LowMemResourceHandle = CreateMemoryResourceNotification(MemoryResourceNotificationType.LowMemoryResourceNotification);
+                    LoMemResourceHandle = CreateMemoryResourceNotification(MemoryResourceNotificationType.LowMemoryResourceNotification);
+                    HiMemResourceHandle = CreateMemoryResourceNotification(MemoryResourceNotificationType.HighMemoryResourceNotification);
 
                     // Get the current memory situation. This reflects the current situation and is seen as an upper boundary
                     // when the management starts. 
@@ -72,9 +77,6 @@ namespace MappableFileStream
                     // This is the threshold that is used to get active with paging
                     // and unmapping when the current memory siutation reaches this threshold.
                     LowerOSMemoryThreshold = (ulong)(MaxAvailableMemory * LowerOSMemoryPercentage);
-
-                    // Also watch for the GC.
-                    GC.RegisterForFullGCNotification(90, 90);
 
                     Console.WriteLine((MaxAvailableMemory - LowerOSMemoryThreshold) / (512 * 512 * 4));
                 }
@@ -137,66 +139,55 @@ namespace MappableFileStream
                     // It only makes sense to perform the cleanup thread if there are streams registered.
                     SpinWait.SpinUntil(() => Streams.Any());
 
-                    var gcStatus = GC.WaitForFullGCApproach(500);
-                    switch (gcStatus)
-                    {
-                        case GCNotificationStatus.NotApplicable:
-                            break;
+                    //var gcStatus = GC.WaitForFullGCApproach(500);
+                    //switch (gcStatus)
+                    //{
+                    //    case GCNotificationStatus.NotApplicable:
+                    //        break;
 
-                        case GCNotificationStatus.Failed:
-                            break;
+                    //    case GCNotificationStatus.Failed:
+                    //        break;
 
-                        case GCNotificationStatus.Succeeded:
-                            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-                            GC.Collect();
-                            GC.WaitForPendingFinalizers();
-                            break;
+                    //    case GCNotificationStatus.Succeeded:
+                    //        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+                    //        GC.Collect();
+                    //        GC.WaitForPendingFinalizers();
 
-                        case GCNotificationStatus.Canceled:
-                            break;
+                    //        Console.WriteLine("GC kicks");
+                    //        break;
 
-                        case GCNotificationStatus.Timeout:
-                            break;
-                    }
+                    //    case GCNotificationStatus.Canceled:
+                    //        break;
+
+                    //    case GCNotificationStatus.Timeout:
+                    //        break;
+                    //}
 
 
-                    var gcStatus2 = GC.WaitForFullGCComplete(500);
-                    switch (gcStatus2)
-                    {
-                        case GCNotificationStatus.NotApplicable:
-                            break;
+                    //var gcStatus2 = GC.WaitForFullGCComplete(500);
+                    //switch (gcStatus2)
+                    //{
+                    //    case GCNotificationStatus.NotApplicable:
+                    //        break;
 
-                        case GCNotificationStatus.Failed:
-                            break;
+                    //    case GCNotificationStatus.Failed:
+                    //        break;
 
-                        case GCNotificationStatus.Succeeded:
-                            break;
+                    //    case GCNotificationStatus.Succeeded:
+                    //        break;
 
-                        case GCNotificationStatus.Canceled:
-                            break;
+                    //    case GCNotificationStatus.Canceled:
+                    //        break;
 
-                        case GCNotificationStatus.Timeout:
-                            break;
-                    }
+                    //    case GCNotificationStatus.Timeout:
+                    //        break;
+                    //}
 
                     // Query for low resources.
-                    //if (QueryMemoryResourceNotification(LowMemResourceHandle, out var state))
-                    //{
-                    //    var memory = GetOSMemory();
-                    //    if (state)
-                    //    {
-                    //        FlushWaitHandle.Reset();
-                    //        CleanupMappableStreams();
-                    //    }
-                    //}
-                    //else
-                    //{
-                    //    // Log the win32 error.
-                    //}
+                    CleanupMappableStreams();
                 }
                 finally
                 {
-                    FlushWaitHandle.Set();
                 }
             }
         }
@@ -205,66 +196,106 @@ namespace MappableFileStream
         {
             try
             {
-                List<(IReadOnlyMappableFileStream, MappableStreamInfo)> streamInfo = new(Streams.Count());
-
-                int totalBookletCount = 0;
-                foreach(var stream in Streams.ToArray())
+                // First check if we have low resources.
+                if (QueryMemoryResourceNotification(LoMemResourceHandle, out var lostate))
                 {
-                    if (stream.Key.IsDisposed)
-                    {
-                        Streams.Remove(stream.Key);
-                        continue;
-                    }
-
-                    var memoryInfo = stream.Key.GetMemoryInfo();
-                    streamInfo.Add((stream.Key, memoryInfo));
-
-                    totalBookletCount += memoryInfo.ItemCount;
+                    if (!lostate)
+                        return;
                 }
 
-                var booklets = ArrayPool<(IReadOnlyMappableFileStream stream, Booklet booklet)>.Shared.Rent(totalBookletCount);
-                try
+                do
                 {
-                    int bookletIndex = 0;
-                    foreach (var (stream, memInfo) in streamInfo)
+                    if (QueryMemoryResourceNotification(HiMemResourceHandle, out var histate))
                     {
-                        foreach (var booklet in memInfo.Booklets)
-                        {
-                            booklets[bookletIndex++] = (stream, booklet);
-                        }
+                        if (histate)
+                            break;
                     }
 
-                    var moreThanMaxAllowedItems = (totalBookletCount > MaxAllowedItems);
-                    var lowerMemoryThresholdReached = GetOSMemory().ullAvailPhys < LowerOSMemoryThreshold;
 
-                    if (moreThanMaxAllowedItems || lowerMemoryThresholdReached)
+                    if (QueryMemoryResourceNotification(LoMemResourceHandle, out var state))
                     {
-                        var items = booklets.Take(totalBookletCount).OrderByDescending(x => x.booklet.LastAccess).ThenByDescending(x => x.booklet.AccessCount);
-                        foreach (var (stream, booklet) in items)
+                        if (!state)
                         {
-                            stream.Unmap(booklet.Index);
+                            break;
+                        }
+                    } else  break;
+
+                    FlushWaitHandle.Reset();
+
+
+                    List<(IReadOnlyMappableFileStream, MappableStreamInfo)> streamInfo = new(Streams.Count());
+
+                    int totalBookletCount = 0;
+                    foreach (var stream in Streams.ToArray())
+                    {
+                        if (stream.Key.IsDisposed)
+                        {
+                            Streams.Remove(stream.Key);
+                            continue;
                         }
 
-                        foreach(var stream in streamInfo)
-                        {
+                        var memoryInfo = stream.Key.GetMemoryInfo();
+                        streamInfo.Add((stream.Key, memoryInfo));
 
-                            stream.Item1.Flush();
-                        }
+                        totalBookletCount += memoryInfo.ItemCount;
                     }
 
-                    if (!HybridHelper.K32EmptyWorkingSet(Process.GetCurrentProcess().SafeHandle))
+                    var booklets = ArrayPool<(IReadOnlyMappableFileStream stream, Booklet booklet)>.Shared.Rent(totalBookletCount);
+                    try
                     {
-                        Console.WriteLine($"EmptyWorkingSet filed an error: {Marshal.GetLastWin32Error()}");
+                        int bookletIndex = 0;
+                        foreach (var (stream, memInfo) in streamInfo)
+                        {
+                            foreach (var booklet in memInfo.Booklets)
+                            {
+                                booklets[bookletIndex++] = (stream, booklet);
+                            }
+                        }
+
+                        var moreThanMaxAllowedItems = (totalBookletCount > MaxAllowedItems);
+                        var lowerMemoryThresholdReached = GetOSMemory().ullAvailPhys < LowerOSMemoryThreshold;
+
+                        if (moreThanMaxAllowedItems || lowerMemoryThresholdReached)
+                        {
+                            var items = booklets.Take(totalBookletCount).OrderByDescending(x => x.booklet.LastAccess).ThenByDescending(x => x.booklet.AccessCount);
+
+                            Stopwatch unmapWatch = Stopwatch.StartNew();
+                            Console.Write("Unmapping: ");
+                            foreach (var (stream, booklet) in items)
+                            {
+                                stream.Unmap(booklet.Index);
+                            }
+                            Console.WriteLine($"{unmapWatch.Elapsed.TotalSeconds}s");
+
+
+                            Stopwatch flushWatch = Stopwatch.StartNew();
+                            Console.Write("Flushing: ");
+                            Parallel.ForEach(streamInfo, stream =>
+                            {
+                                stream.Item1.Flush();
+                            });
+                            Console.WriteLine($"{flushWatch.Elapsed.TotalSeconds}s");
+                        }
+
+                        if (!HybridHelper.K32EmptyWorkingSet(Process.GetCurrentProcess().SafeHandle))
+                        {
+                            Console.WriteLine($"EmptyWorkingSet filed an error: {Marshal.GetLastWin32Error()}");
+                        }
+                    }
+                    finally
+                    {
+                        ArrayPool<(IReadOnlyMappableFileStream stream, Booklet booklet)>.Shared.Return(booklets);
                     }
                 }
-                finally
-                {
-                    ArrayPool<(IReadOnlyMappableFileStream stream, Booklet booklet)>.Shared.Return(booklets);
-                }
+                while (true);
             }
             catch (Exception ex)
             {
 
+            }
+            finally
+            {
+                FlushWaitHandle.Set();
             }
         }
     }

@@ -9,12 +9,12 @@ namespace MappableFileStream
 {
     class Program
     {
-
+        static bool Cancel = false;
         static async Task Main(string[] args)
         {
             var process = Process.GetCurrentProcess();
-            process.MaxWorkingSet = (nint)(HybridHelper.GetOSMemory().ullAvailPhys * 0.9d);
-          //  process.MinWorkingSet = (nint)(HybridHelper.GetOSMemory().ullAvailPhys * 0.5d);
+            //process.MaxWorkingSet = (nint)(HybridHelper.GetOSMemory().ullAvailPhys * 0.5d);
+            // process.MinWorkingSet = (nint)(HybridHelper.GetOSMemory().ullAvailPhys * 0.5d);
 
             Stopwatch stopWatch = new Stopwatch();
             stopWatch.Start();
@@ -42,10 +42,26 @@ namespace MappableFileStream
 
             DateTime lastTime = DateTime.Now;
 
+            var headline = "{0,5} | {1,12} | {2,12} | {3,12} | {4,12} | {5,12} | {6,12} | {7,12} | {8,12}";
+
             Timer timer = new Timer(callback);
+
+             Console.WriteLine(String.Format(headline,
+                "Count",
+                "WorkingSet",
+                "PeakSet",
+                "MinSet",
+                "MaxSet",
+                "Virtual",
+                "PeakVirtual",
+                "Private",
+                "NonPaged"
+                ));
+
 
             void callback(object state)
             {
+
                 if (lastCount == currentCount)
                     return;
 
@@ -59,27 +75,8 @@ namespace MappableFileStream
                 lastCount = currentCount;
                 lastTime = nowTime;
 
-                HybridHelper.GetProcessWorkingSetSize(Process.GetCurrentProcess().SafeHandle, out var minSet, out var maxSet);
-
-
-                var headline = "{0,5} | {1,12} | {2,12} | {3,12} | {4,12} | {5,12} | {6,12} | {7,12} | {8,12}";
-                var (left,top) = Console.GetCursorPosition();
-                Console.SetCursorPosition(0, 0);
-                Console.WriteLine(String.Format(headline,
-                    "Count",
-                    "WorkingSet",
-                    "PeakSet",
-                    "MinSet",
-                    "MaxSet",
-                    "Virtual",
-                    "PeakVirtual",
-                    "Private",
-                    "NonPaged"
-                    ));
-
-                Console.SetCursorPosition(left, top);
-
                 process.Refresh();
+                MappableFileStreamManager.FlushWait();
                 Console.WriteLine(String.Format(headline,
                     nowCount,
                     process.WorkingSet64,
@@ -98,14 +95,22 @@ namespace MappableFileStream
 
             timer.Change(0, 1000);
 
+
+            Console.CancelKeyPress += ConsoleCancelEventHandler;
             await Task.Run(() =>
             {
-                Parallel.For(0, volumeStart.SizeZ, i =>
-               //    for (int i = 0; i < volumeStart.SizeZ; i++)
+                Parallel.For(0, volumeStart.SizeZ, (i, loopState) =>
+                //    for (int i = 0; i < volumeStart.SizeZ; i++)
                 {
                     var data = volumeStart.GetData(i);
 
                     Interlocked.Increment(ref currentCount);
+
+                    if (Cancel)
+                    {
+                        loopState.Break();
+                        return;
+                    }
                 }
                    );
             });
@@ -118,6 +123,13 @@ namespace MappableFileStream
             TimeSpan ts = stopWatch.Elapsed;
             Console.WriteLine("RunTime: " + ts.TotalMilliseconds + "ms");
 
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("Finished");
+        }
+
+        public static void ConsoleCancelEventHandler(object? sender, ConsoleCancelEventArgs e)
+        {
+            Cancel = true;
         }
     }
 }

@@ -167,8 +167,7 @@ namespace MappableFileStream
 
         public void Flush()
         {
-            //InternalStream.Flush(true);
-            //ViewAccessor.Flush();
+            ViewAccessor.Flush();
         }
 
         public bool IsDisposed { get; private set; }
