@@ -4,7 +4,7 @@ using System;
 namespace MappableFileStream
 {
 
-    public interface IReadOnlyMappableFileStream
+    public interface IReadOnlyMappableFileStream : IDisposable
     {
         /// <summary>
         /// Indicates if the stream has been disposed and cannot be used anymore.
@@ -12,12 +12,6 @@ namespace MappableFileStream
         bool IsDisposed { get; }
 
         int BlockSize { get; }
-
-        /// <summary>
-        /// Gets the amount of currently mapped memory.
-        /// </summary>
-        /// <returns></returns>
-        MappableStreamInfo GetMemoryInfo();
 
         /// <summary>
         /// Returns a pointer to the first element of the first block.
@@ -57,6 +51,8 @@ namespace MappableFileStream
 
         void Flush();
     }
+
+
 
     public interface IMappableFileStream : IReadOnlyMappableFileStream
     {

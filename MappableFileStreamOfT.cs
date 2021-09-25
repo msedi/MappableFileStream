@@ -15,58 +15,13 @@ namespace MappableFileStream
     /// <typeparam name="T"></typeparam>
     sealed unsafe class MappableFileStream<T> : MappableFileStream, IMappableFileStream<T>, IDisposable where T : unmanaged
     {
-        readonly FileStream InternalStream;
-        readonly MemoryMappedFile InternalMemoryMap;
-        readonly MemoryMappedViewAccessor ViewAccessor;
-        readonly nint StartAddress;
-
-        readonly object SyncRoot = new();
-
-        /// <summary>
-        /// Gets the total number of blocks.
-        /// </summary>
-        readonly int NoOfBlocks = 0;
-
-        /// <summary>
-        /// Gets the size of a block in number of elements.
-        /// </summary>
-        public int BlockSize { get; } = 0;
-
-        /// <summary>
-        /// Gets the size of a block in bytes.
-        /// </summary>
-        readonly int BlockSizeInBytes = 0;
-
-        public readonly ConcurrentDictionary<int, Booklet> InternalStore = new(Environment.ProcessorCount, 100);
-
         /// <summary>
         /// Creates a new instance of <see cref="MappableFileStream{T}"/>.
         /// </summary>
         /// <param name="blockSize"></param>
         /// <param name="noOfBlocks"></param>
-        internal MappableFileStream(FileStream stream, MemoryMappedFile memoryMappedFile, int blockSize, int blockSizeInBytes, int noOfBlocks)
+        internal MappableFileStream(FileStream stream, MemoryMappedFile memoryMappedFile, int blockSize, int blockSizeInBytes, int noOfBlocks) : base(stream, memoryMappedFile, blockSize, blockSizeInBytes, noOfBlocks)
         {
-            InternalStream = stream;
-            InternalMemoryMap = memoryMappedFile;
-
-            NoOfBlocks = noOfBlocks;
-            BlockSize = blockSize;
-            BlockSizeInBytes = blockSizeInBytes;
-
-            ViewAccessor = InternalMemoryMap.CreateViewAccessor();
-            StartAddress = ViewAccessor.SafeMemoryMappedViewHandle.DangerousGetHandle();
-        }
-
-        /// <summary>
-        /// Returns a pointer to the first element of the first block.
-        /// </summary>
-        /// <returns></returns>
-        [SkipLocalsInit]
-        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-        public IntPtr DangerousGetHandle()
-        {
-            MappableFileStreamManager.FlushWaitHandle.Wait();
-            return StartAddress;
         }
 
         [SkipLocalsInit]
@@ -74,21 +29,10 @@ namespace MappableFileStream
         private T* NonBlockingDangerousGetHandle(int blockNo) => (T*)StartAddress + checked(blockNo * (long)BlockSize);
 
         /// <summary>
-        /// Method that updates the booklet.
-        /// </summary>
-        /// <param name="blockNo"></param>
-        [SkipLocalsInit]
-        [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.AggressiveInlining)]
-        public void TouchBlock(int blockNo)
-        {
-            InternalStore.AddOrUpdate(blockNo, (x) => new Booklet(blockNo), (x, b) => b.Touch());
-        }
-
-        /// <summary>
         /// Suggests the memory manager that the memory area can be paged if necessary.
         /// </summary>
         /// <param name="blockNo"></param>
-        public void Unmap(int blockNo)
+        public override void Unmap(int blockNo)
         {
             // Get the address of the block.
             var blockAddress = NonBlockingDangerousGetHandle(blockNo);
@@ -104,7 +48,7 @@ namespace MappableFileStream
         /// Suggests the memory manager that the memory area can be paged if necessary.
         /// </summary>
         /// <param name="blockNo"></param>
-        public void UnmapRange(int startBlock, int noOfBlocks)
+        public override void UnmapRange(int startBlock, int noOfBlocks)
         {
             // Get the address of the block.
             var blockAddress = NonBlockingDangerousGetHandle(startBlock);
@@ -149,40 +93,5 @@ namespace MappableFileStream
             for (int i = startBlock; i < noOfBlocks; i++)
                 InternalStore.TryRemove(i, out _);
         }
-
-        /// <summary>
-        /// Gets the amount of currently mapped memory.
-        /// </summary>
-        /// <returns></returns>
-        public MappableStreamInfo GetMemoryInfo()
-        {
-            return new MappableStreamInfo(InternalStore.Values, BlockSize, BlockSizeInBytes);
-        }
-
-        public void Flush()
-        {
-            ViewAccessor.Flush();
-        }
-
-        public bool IsDisposed { get; private set; }
-
-        /// <summary>
-        /// Disposes allocated unmanaged resources.
-        /// </summary>
-        public override void Dispose()
-        {
-            if (IsDisposed)
-                return;
-
-            IsDisposed = true;
-            GC.SuppressFinalize(this);
-
-            ViewAccessor?.Dispose();
-            InternalMemoryMap?.Dispose();
-            InternalStream?.Dispose();
-
-            MappableFileStreamManager.RemoveStream(this);
-        }
-
     }
 }

@@ -6,9 +6,11 @@ using System.Threading.Tasks;
 using System.IO;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 
 namespace MappableFileStream
 {
+    [DebuggerDisplay("{OutputVolume}")]
     unsafe class Processor : DataSource
     {
         DataSource InputVolume;
@@ -23,6 +25,10 @@ namespace MappableFileStream
             SizeZ = inputVolume.SizeZ;
         }
 
+        public override void Dispose()
+        {
+            OutputVolume.Dispose();
+        }
 
         public override ReadOnlySpan<int> GetData(int sliceIndex)
         {

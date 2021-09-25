@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Buffers;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -21,13 +22,18 @@ namespace MappableFileStream
         /// <summary>
         /// Holds a list of all created <see cref="MappableFileStream"/>.
         /// </summary>
-        readonly static ConditionalWeakTable<IReadOnlyMappableFileStream, object> Streams = new();
+        readonly static ConditionalWeakTable<MappableFileStream, object> Streams = new();
+
+        private static ulong MaxAvailableMemoryOnStartup;
+
 
         static IntPtr LoMemResourceHandle;
         static IntPtr HiMemResourceHandle;
         static ulong MaxAvailableMemory;
 
         internal static readonly ManualResetEventSlim FlushWaitHandle = new(true);
+
+        internal static readonly ReaderWriterLockSlim FlushLock = new(LockRecursionPolicy.SupportsRecursion);
 
         /// <summary>
         /// Gets a value of how many items are allowed at maximum to be stored concurrently in memory.
@@ -46,40 +52,37 @@ namespace MappableFileStream
         /// This is the percentage of the <see cref="MaxAvailableMemory"/>. The <see cref="LowerOSMemoryThreshold"/> is calculated by
         /// multiplying the <see cref="MaxAvailableMemory"/> with the <see cref="LowerOSMemoryPercentage"/>.
         /// </summary>
-        static float LowerOSMemoryPercentage = 0.2f;
+        static double LowerOSMemoryPercentage = 0.1d;
 
         static Thread MemoryThread;
 
         public static void FlushWait() => FlushWaitHandle.Wait();
 
+        static MappableFileStreamManager()
+        {
+            // Get the current memory situation. This reflects the current situation and is seen as an upper boundary
+            // when the management starts. 
+            MaxAvailableMemoryOnStartup = MaxAvailableMemory = GetOSMemory().ullAvailPhys;
+
+            AppDomain.CurrentDomain.ProcessExit += CurrentDomain_ProcessExit;
+
+            LoMemResourceHandle = CreateMemoryResourceNotification(MemoryResourceNotificationType.LowMemoryResourceNotification);
+            HiMemResourceHandle = CreateMemoryResourceNotification(MemoryResourceNotificationType.HighMemoryResourceNotification);
+
+            // This is the threshold that is used to get active with paging
+            // and unmapping when the current memory siutation reaches this threshold.
+            LowerOSMemoryThreshold = (ulong)(MaxAvailableMemory * LowerOSMemoryPercentage);
+        }
+
         /// <summary>
         /// Adds a stream being managed by the <see cref="MappableFileStreamManager"/>.
         /// </summary>
         /// <param name="stream"></param>
-        internal static void AddStream(IReadOnlyMappableFileStream stream)
+        internal static void AddStream(MappableFileStream stream)
         {
             lock (Streams)
             {
                 Streams.Add(stream, null);
-
-                // We need to check if the thread is running.
-                if (LoMemResourceHandle == IntPtr.Zero)
-                {
-                    AppDomain.CurrentDomain.ProcessExit += CurrentDomain_ProcessExit;
-
-                    LoMemResourceHandle = CreateMemoryResourceNotification(MemoryResourceNotificationType.LowMemoryResourceNotification);
-                    HiMemResourceHandle = CreateMemoryResourceNotification(MemoryResourceNotificationType.HighMemoryResourceNotification);
-
-                    // Get the current memory situation. This reflects the current situation and is seen as an upper boundary
-                    // when the management starts. 
-                    MaxAvailableMemory = GetOSMemory().ullAvailPhys;
-
-                    // This is the threshold that is used to get active with paging
-                    // and unmapping when the current memory siutation reaches this threshold.
-                    LowerOSMemoryThreshold = (ulong)(MaxAvailableMemory * LowerOSMemoryPercentage);
-
-                    Console.WriteLine((MaxAvailableMemory - LowerOSMemoryThreshold) / (512 * 512 * 4));
-                }
 
                 AdjustMemoryLimits();
 
@@ -92,6 +95,22 @@ namespace MappableFileStream
             }
         }
 
+        /// <summary>
+        /// Sets the upper boundary of memory that is allowed to be used by all <see cref="MappableFileStream"/>s.
+        /// </summary>
+        /// <param name="allowedMaximumMemory">Sets the allowed memory in bytes.</param>
+        public static void SetMaxMemory(ulong allowedMaximumMemory)
+        {
+            if (allowedMaximumMemory != default)
+                MaxAvailableMemory = Math.Min(MaxAvailableMemoryOnStartup, allowedMaximumMemory);
+            else
+                MaxAvailableMemory = MaxAvailableMemoryOnStartup;
+
+            Console.WriteLine($"Maximum Allowed Memory: {MaxAvailableMemory}");
+
+            AdjustMemoryLimits();
+        }
+
         private static void CurrentDomain_ProcessExit(object sender, EventArgs e)
         {
         }
@@ -101,6 +120,9 @@ namespace MappableFileStream
         /// </summary>
         private static void AdjustMemoryLimits()
         {
+            if (!Streams.Any())
+                return;
+
             var memoryInfo = Streams.Select(x => x.Key.GetMemoryInfo()).ToArray();
             var possibleMemory = MaxAvailableMemory - LowerOSMemoryThreshold;
 
@@ -116,13 +138,15 @@ namespace MappableFileStream
                 var maxBlockSize = memoryInfo.Max(x => x.BlockSizeInBytes);
                 MaxAllowedItems = (int)Math.Floor(possibleMemory / (double)maxBlockSize);
             }
+
+            Console.WriteLine($"Max Items: {MaxAllowedItems}");
         }
 
         /// <summary>
         /// Removes a stream from being managed by the <see cref="MappableFileStreamManager"/>.
         /// </summary>
         /// <param name="stream"></param>
-        internal static void RemoveStream(IReadOnlyMappableFileStream stream)
+        internal static void RemoveStream(MappableFileStream stream)
         {
             lock (Streams)
             {
@@ -134,16 +158,11 @@ namespace MappableFileStream
         {
             while (true)
             {
-                try
-                {
-                    // It only makes sense to perform the cleanup thread if there are streams registered.
-                    SpinWait.SpinUntil(() => Streams.Any());
-                    // Query for low resources.
-                    CleanupMappableStreams();
-                }
-                finally
-                {
-                }
+                // It only makes sense to perform the cleanup thread if there are streams registered.
+                SpinWait.SpinUntil(() => Streams.Any());
+
+                // Query for low resources.
+                CleanupMappableStreams();
             }
         }
 
@@ -171,37 +190,57 @@ namespace MappableFileStream
         [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
         private static bool IsMemoryLo()
         {
+            [SkipLocalsInit]
+            [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+            static bool TooManyBooklets()
+            {
+                var items = GetStreams();
+
+                return items.totalBookletCount > MaxAllowedItems;
+            }
+
             if (QueryMemoryResourceNotification(LoMemResourceHandle, out var state))
             {
+                if ((!state && (GetOSMemory().ullAvailPhys < LowerOSMemoryThreshold)) || TooManyBooklets())
+                    return true;
+
                 return state;
             }
 
             return false;
         }
 
-        private static StreamInfo GetStreamInfo()
+        /// <summary>
+        /// Returns the total amount of currently allocated items.
+        /// </summary>
+        /// <returns></returns>
+        [SkipLocalsInit]
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        private static (MappableFileStream[] activeStreams, int totalBookletCount) GetStreams()
         {
-            var streamInfo = ArrayPool<(IReadOnlyMappableFileStream, MappableStreamInfo)>.Shared.Rent(Streams.Count());
-
             int totalBookletCount = 0;
-            int streamCount = 0;
-            foreach (var stream in Streams.ToArray())
+
+            lock (Streams)
             {
-                // Remove already disposed streams.
-                if (stream.Key.IsDisposed)
+                List<MappableFileStream> result = new(Streams.Count());
+
+                foreach (var stream in Streams)
                 {
-                    Streams.Remove(stream.Key);
-                    continue;
+                    // Remove already disposed streams.
+                    if (stream.Key.IsDisposed)
+                    {
+                        Streams.Remove(stream.Key);
+                        continue;
+                    }
+
+
+                    totalBookletCount += stream.Key.InternalStore.Count;
+                    result.Add(stream.Key);
                 }
 
-                var memoryInfo = stream.Key.GetMemoryInfo();
-                streamInfo[streamCount++] = (stream.Key, memoryInfo);
 
-                totalBookletCount += memoryInfo.ItemCount;
+                return (result.ToArray(), totalBookletCount);
             }
-
-            return new StreamInfo(streamInfo, streamCount, totalBookletCount);
-
         }
 
         private static void CleanupMappableStreams()
@@ -213,47 +252,42 @@ namespace MappableFileStream
                     // Escape the cleanup if memory resources are enough.
                     if (!IsMemoryLo() && IsMemoryHi()) return;
 
+                    // Get the total amount of currently allocated items.
+                    (MappableFileStream[] activeStreams, int totalBookletCount) = GetStreams();
+
                     // Block the access to streams so that noone can currently allocate new memory.
                     FlushWaitHandle.Reset();
 
-                    using var streamInfo = GetStreamInfo();
-
-                    var booklets = ArrayPool<(IReadOnlyMappableFileStream stream, Booklet booklet)>.Shared.Rent(streamInfo.TotalBookletCount);
+                    var booklets = ArrayPool<(MappableFileStream stream, Booklet booklet)>.Shared.Rent(totalBookletCount);
                     try
                     {
                         int bookletIndex = 0;
-                        foreach (var (stream, memInfo) in streamInfo.Get)
+                        foreach (var stream in activeStreams)
                         {
-                            foreach (var booklet in memInfo.GetBooklets())
+                            foreach (var booklet in stream.InternalStore.Values)
                             {
                                 booklets[bookletIndex++] = (stream, booklet);
                             }
                         }
 
-                        var moreThanMaxAllowedItems = (streamInfo.TotalBookletCount > MaxAllowedItems);
-                        var lowerMemoryThresholdReached = GetOSMemory().ullAvailPhys < LowerOSMemoryThreshold;
+                        var items = booklets.Take(totalBookletCount).OrderByDescending(x => x.booklet.LastAccess).ThenByDescending(x => x.booklet.AccessCount);
 
-                        if (moreThanMaxAllowedItems || lowerMemoryThresholdReached)
+                        Stopwatch unmapWatch = Stopwatch.StartNew();
+                        Console.Write("Unmapping: ");
+                        foreach (var (stream, booklet) in items)
                         {
-                            var items = booklets.Take(totalBookletCount).OrderByDescending(x => x.booklet.LastAccess).ThenByDescending(x => x.booklet.AccessCount);
-
-                            Stopwatch unmapWatch = Stopwatch.StartNew();
-                            Console.Write("Unmapping: ");
-                            foreach (var (stream, booklet) in items)
-                            {
-                                stream.Unmap(booklet.Index);
-                            }
-                            Console.WriteLine($"{unmapWatch.Elapsed.TotalSeconds}s");
-
-
-                            Stopwatch flushWatch = Stopwatch.StartNew();
-                            Console.Write("Flushing: ");
-                            Parallel.ForEach(streamInfo, stream =>
-                            {
-                                stream.Item1.Flush();
-                            });
-                            Console.WriteLine($"{flushWatch.Elapsed.TotalSeconds}s");
+                            stream.Unmap(booklet.Index);
                         }
+                        Console.WriteLine($"{unmapWatch.Elapsed.TotalSeconds}s");
+
+
+                        Stopwatch flushWatch = Stopwatch.StartNew();
+                        Console.Write("Flushing: ");
+                        Parallel.ForEach(activeStreams, stream =>
+                        {
+                            stream.Flush();
+                        });
+                        Console.WriteLine($"{flushWatch.Elapsed.TotalSeconds}s");
 
                         if (!HybridHelper.K32EmptyWorkingSet(Process.GetCurrentProcess().SafeHandle))
                         {
@@ -262,10 +296,7 @@ namespace MappableFileStream
                     }
                     finally
                     {
-                        ArrayPool<(IReadOnlyMappableFileStream stream, Booklet booklet)>.Shared.Return(booklets);
-
-                        foreach (var s in streamInfo)
-                            s.Item2.Dispose();
+                        ArrayPool<(MappableFileStream stream, Booklet booklet)>.Shared.Return(booklets, true);
                     }
                 }
                 while (true);
@@ -279,28 +310,6 @@ namespace MappableFileStream
                 // Allow access to streams again.
                 FlushWaitHandle.Set();
             }
-        }
-    }
-
-    readonly ref struct StreamInfo
-    {
-
-        readonly (IReadOnlyMappableFileStream stream, MappableStreamInfo memInfo)[] InternalStreams;
-
-        public readonly int TotalBookletCount;
-
-         readonly int StreamCount;
-
-        public StreamInfo((IReadOnlyMappableFileStream stream, MappableStreamInfo memInfo)[] streams, int streamCount, int bookletCount)
-        {
-            InternalStreams = streams;
-            StreamCount = streamCount;
-            TotalBookletCount = bookletCount;
-        }
-
-        public void Dispose()
-        {
-            ArrayPool<(IReadOnlyMappableFileStream stream, MappableStreamInfo memInfo)>.Shared.Return(InternalStreams);
         }
     }
 }

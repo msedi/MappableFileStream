@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -10,25 +11,31 @@ namespace MappableFileStream
     class Program
     {
         static bool Cancel = false;
+
+     static    ConcurrentBag<int[]> items = new ();
+
         static async Task Main(string[] args)
         {
+            int SizeX, SizeY;
+
+            SizeX = SizeY = 512;
+
             var process = Process.GetCurrentProcess();
-            //process.MaxWorkingSet = (nint)(HybridHelper.GetOSMemory().ullAvailPhys * 0.5d);
+            process.MaxWorkingSet = (nint)(HybridHelper.GetOSMemory().ullAvailPhys * 0.5d);
             // process.MinWorkingSet = (nint)(HybridHelper.GetOSMemory().ullAvailPhys * 0.5d);
+
+            MappableFileStreamManager.SetMaxMemory((ulong)(HybridHelper.GetOSMemory().ullAvailPhys * 0.4d));
 
             Stopwatch stopWatch = new Stopwatch();
             stopWatch.Start();
 
-            int SizeX, SizeY;
 
-            SizeX = SizeY = 256;
-
-            DataSource volumeStart = new Volume(SizeX, SizeY, 10000);
+            DataSource volumeStart = new Volume(SizeX, SizeY, 1000);
 
             List<DataSource> sources = new List<DataSource>();
 
             sources.Add(volumeStart);
-            for (int i = 0; i < 20; i++)
+            for (int i = 0; i < 10; i++)
             {
                 Processor p = new Processor(volumeStart);
                 volumeStart = p;
@@ -42,20 +49,14 @@ namespace MappableFileStream
 
             DateTime lastTime = DateTime.Now;
 
-            var headline = "{0,5} | {1,12} | {2,12} | {3,12} | {4,12} | {5,12} | {6,12} | {7,12} | {8,12}";
+            var headline = "{0,5} | {1,12} | {2,12}";
 
             Timer timer = new Timer(callback);
 
              Console.WriteLine(String.Format(headline,
                 "Count",
                 "WorkingSet",
-                "PeakSet",
-                "MinSet",
-                "MaxSet",
-                "Virtual",
-                "PeakVirtual",
-                "Private",
-                "NonPaged"
+                "Avail. Phys"
                 ));
 
 
@@ -80,14 +81,7 @@ namespace MappableFileStream
                 Console.WriteLine(String.Format(headline,
                     nowCount,
                     process.WorkingSet64,
-                    process.PeakWorkingSet64,
-                    (long)process.MinWorkingSet,
-                    (long)process.MaxWorkingSet,
-                    process.VirtualMemorySize64,
-                    process.PeakVirtualMemorySize64,
-                    process.PrivateMemorySize64,
-                    process.NonpagedSystemMemorySize64
-
+                    HybridHelper.GetOSMemory().ullAvailPhys
                     ));
 
                 //-Items per s: { diff / diffTime.TotalSeconds} ({ HybridHelper.GetOSMemory().ullAvailPhys}) 
@@ -118,10 +112,17 @@ namespace MappableFileStream
             //Console.WriteLine($"{HybridFileStream<int>.Watch.Elapsed.TotalMilliseconds}ms");
 
 
+            Stopwatch disposeWatch = Stopwatch.StartNew();
+            volumeStart.Dispose();
+            foreach (var processor in sources)
+                processor.Dispose();
+            Console.WriteLine("Dispose: " + disposeWatch.Elapsed.TotalMilliseconds + "ms");
 
-            stopWatch.Stop();
+
+
             TimeSpan ts = stopWatch.Elapsed;
             Console.WriteLine("RunTime: " + ts.TotalMilliseconds + "ms");
+
 
             Console.ForegroundColor = ConsoleColor.Red;
             Console.WriteLine("Finished");

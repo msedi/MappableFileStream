@@ -1,14 +1,18 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 
 namespace MappableFileStream
 {
-    unsafe class Volume : DataSource, IDisposable
+    [DebuggerDisplay("{hs}")]
+    unsafe class Volume : DataSource
     {
         readonly IMappableFileStream<int> hs;
 
         readonly int N;
         string TempPath = "D:\\MMF";
+
+       static  int Number=0;
     
         public Volume(int sizex, int sizey, int sizez, string fileName = null)
         {
@@ -21,9 +25,11 @@ namespace MappableFileStream
             if (!Directory.Exists(TempPath))
                 Directory.CreateDirectory(TempPath);
 
+            
             if (string.IsNullOrEmpty(fileName))
             {
-                fileName = Path.Combine(TempPath, Guid.NewGuid().ToString()) + ".tmp";
+                //Guid.NewGuid().ToString()
+                fileName = Path.Combine(TempPath, (Number++).ToString()) + ".tmp";
                 hs = MappableFileStream.CreateNew<int>(fileName, N, SizeZ);
             }
             else
@@ -32,8 +38,9 @@ namespace MappableFileStream
             }
         }
 
-        public void Dispose()
+        public override void Dispose()
         {
+            hs.Dispose();
         }
 
         public override ReadOnlySpan<int> GetData(int sliceIndex)
@@ -49,7 +56,7 @@ namespace MappableFileStream
 
         public Span<int> GetWriteHandle(int sliceIndex)
         {
-            return hs.DangerousGetWriteHandle(sliceIndex);  
+            return hs.GetWriteHandle(sliceIndex);  
         }
     }
 }

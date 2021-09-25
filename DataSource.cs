@@ -8,7 +8,7 @@ using System.Runtime.InteropServices;
 
 namespace MappableFileStream
 {
-    abstract class DataSource
+    abstract class DataSource : IDisposable
     {
         public int SizeX;
         public int SizeY;
@@ -16,6 +16,12 @@ namespace MappableFileStream
 
         public DataSource()
         {
+        }
+
+        public virtual void Dispose()
+        {
+            GC.SuppressFinalize(this);
+            
         }
 
         abstract public ReadOnlySpan<int> GetData(int sliceIndex);
