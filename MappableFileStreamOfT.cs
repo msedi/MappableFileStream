@@ -5,6 +5,7 @@ using System.IO;
 using System.IO.MemoryMappedFiles;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace MappableFileStream
 {
@@ -155,14 +156,7 @@ namespace MappableFileStream
         /// <returns></returns>
         public MappableStreamInfo GetMemoryInfo()
         {
-            return new MappableStreamInfo()
-            {
-                ItemCount = InternalStore.Count,
-                MappedMemory = (ulong)InternalStore.Count * (ulong)BlockSizeInBytes,
-                Booklets = InternalStore.Values.ToArray(),
-                BlockSize=BlockSize,
-                BlockSizeInBytes=BlockSizeInBytes
-            };
+            return new MappableStreamInfo(InternalStore.Values, BlockSize, BlockSizeInBytes);
         }
 
         public void Flush()

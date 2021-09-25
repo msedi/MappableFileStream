@@ -138,51 +138,6 @@ namespace MappableFileStream
                 {
                     // It only makes sense to perform the cleanup thread if there are streams registered.
                     SpinWait.SpinUntil(() => Streams.Any());
-
-                    //var gcStatus = GC.WaitForFullGCApproach(500);
-                    //switch (gcStatus)
-                    //{
-                    //    case GCNotificationStatus.NotApplicable:
-                    //        break;
-
-                    //    case GCNotificationStatus.Failed:
-                    //        break;
-
-                    //    case GCNotificationStatus.Succeeded:
-                    //        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-                    //        GC.Collect();
-                    //        GC.WaitForPendingFinalizers();
-
-                    //        Console.WriteLine("GC kicks");
-                    //        break;
-
-                    //    case GCNotificationStatus.Canceled:
-                    //        break;
-
-                    //    case GCNotificationStatus.Timeout:
-                    //        break;
-                    //}
-
-
-                    //var gcStatus2 = GC.WaitForFullGCComplete(500);
-                    //switch (gcStatus2)
-                    //{
-                    //    case GCNotificationStatus.NotApplicable:
-                    //        break;
-
-                    //    case GCNotificationStatus.Failed:
-                    //        break;
-
-                    //    case GCNotificationStatus.Succeeded:
-                    //        break;
-
-                    //    case GCNotificationStatus.Canceled:
-                    //        break;
-
-                    //    case GCNotificationStatus.Timeout:
-                    //        break;
-                    //}
-
                     // Query for low resources.
                     CleanupMappableStreams();
                 }
@@ -192,67 +147,90 @@ namespace MappableFileStream
             }
         }
 
+        /// <summary>
+        /// Check if we have hi memory resources.
+        /// </summary>
+        /// <returns></returns>
+        [SkipLocalsInit]
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        private static bool IsMemoryHi()
+        {
+            if (QueryMemoryResourceNotification(HiMemResourceHandle, out var state))
+            {
+                return state;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Check if we have lo memory resources.
+        /// </summary>
+        /// <returns></returns>
+        [SkipLocalsInit]
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        private static bool IsMemoryLo()
+        {
+            if (QueryMemoryResourceNotification(LoMemResourceHandle, out var state))
+            {
+                return state;
+            }
+
+            return false;
+        }
+
+        private static StreamInfo GetStreamInfo()
+        {
+            var streamInfo = ArrayPool<(IReadOnlyMappableFileStream, MappableStreamInfo)>.Shared.Rent(Streams.Count());
+
+            int totalBookletCount = 0;
+            int streamCount = 0;
+            foreach (var stream in Streams.ToArray())
+            {
+                // Remove already disposed streams.
+                if (stream.Key.IsDisposed)
+                {
+                    Streams.Remove(stream.Key);
+                    continue;
+                }
+
+                var memoryInfo = stream.Key.GetMemoryInfo();
+                streamInfo[streamCount++] = (stream.Key, memoryInfo);
+
+                totalBookletCount += memoryInfo.ItemCount;
+            }
+
+            return new StreamInfo(streamInfo, streamCount, totalBookletCount);
+
+        }
+
         private static void CleanupMappableStreams()
         {
             try
             {
-                // First check if we have low resources.
-                if (QueryMemoryResourceNotification(LoMemResourceHandle, out var lostate))
-                {
-                    if (!lostate)
-                        return;
-                }
-
                 do
                 {
-                    if (QueryMemoryResourceNotification(HiMemResourceHandle, out var histate))
-                    {
-                        if (histate)
-                            break;
-                    }
+                    // Escape the cleanup if memory resources are enough.
+                    if (!IsMemoryLo() && IsMemoryHi()) return;
 
-
-                    if (QueryMemoryResourceNotification(LoMemResourceHandle, out var state))
-                    {
-                        if (!state)
-                        {
-                            break;
-                        }
-                    } else  break;
-
+                    // Block the access to streams so that noone can currently allocate new memory.
                     FlushWaitHandle.Reset();
 
+                    using var streamInfo = GetStreamInfo();
 
-                    List<(IReadOnlyMappableFileStream, MappableStreamInfo)> streamInfo = new(Streams.Count());
-
-                    int totalBookletCount = 0;
-                    foreach (var stream in Streams.ToArray())
-                    {
-                        if (stream.Key.IsDisposed)
-                        {
-                            Streams.Remove(stream.Key);
-                            continue;
-                        }
-
-                        var memoryInfo = stream.Key.GetMemoryInfo();
-                        streamInfo.Add((stream.Key, memoryInfo));
-
-                        totalBookletCount += memoryInfo.ItemCount;
-                    }
-
-                    var booklets = ArrayPool<(IReadOnlyMappableFileStream stream, Booklet booklet)>.Shared.Rent(totalBookletCount);
+                    var booklets = ArrayPool<(IReadOnlyMappableFileStream stream, Booklet booklet)>.Shared.Rent(streamInfo.TotalBookletCount);
                     try
                     {
                         int bookletIndex = 0;
-                        foreach (var (stream, memInfo) in streamInfo)
+                        foreach (var (stream, memInfo) in streamInfo.Get)
                         {
-                            foreach (var booklet in memInfo.Booklets)
+                            foreach (var booklet in memInfo.GetBooklets())
                             {
                                 booklets[bookletIndex++] = (stream, booklet);
                             }
                         }
 
-                        var moreThanMaxAllowedItems = (totalBookletCount > MaxAllowedItems);
+                        var moreThanMaxAllowedItems = (streamInfo.TotalBookletCount > MaxAllowedItems);
                         var lowerMemoryThresholdReached = GetOSMemory().ullAvailPhys < LowerOSMemoryThreshold;
 
                         if (moreThanMaxAllowedItems || lowerMemoryThresholdReached)
@@ -285,6 +263,9 @@ namespace MappableFileStream
                     finally
                     {
                         ArrayPool<(IReadOnlyMappableFileStream stream, Booklet booklet)>.Shared.Return(booklets);
+
+                        foreach (var s in streamInfo)
+                            s.Item2.Dispose();
                     }
                 }
                 while (true);
@@ -295,8 +276,31 @@ namespace MappableFileStream
             }
             finally
             {
+                // Allow access to streams again.
                 FlushWaitHandle.Set();
             }
+        }
+    }
+
+    readonly ref struct StreamInfo
+    {
+
+        readonly (IReadOnlyMappableFileStream stream, MappableStreamInfo memInfo)[] InternalStreams;
+
+        public readonly int TotalBookletCount;
+
+         readonly int StreamCount;
+
+        public StreamInfo((IReadOnlyMappableFileStream stream, MappableStreamInfo memInfo)[] streams, int streamCount, int bookletCount)
+        {
+            InternalStreams = streams;
+            StreamCount = streamCount;
+            TotalBookletCount = bookletCount;
+        }
+
+        public void Dispose()
+        {
+            ArrayPool<(IReadOnlyMappableFileStream stream, MappableStreamInfo memInfo)>.Shared.Return(InternalStreams);
         }
     }
 }
