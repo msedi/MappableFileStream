@@ -10,7 +10,7 @@ namespace MappableFileStream
         readonly IMappableFileStream<int> hs;
 
         readonly int N;
-        string TempPath = "D:\\MMF";
+        string TempPath = "C:\\MMF";
 
        static  int Number=0;
     

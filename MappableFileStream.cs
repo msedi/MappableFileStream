@@ -152,6 +152,15 @@ namespace MappableFileStream
             fileStream.SetLength(totalSizeInBytes);
             HybridHelper.SetValidFileRegion(fileStream.SafeFileHandle, totalSizeInBytes);
 
+            HybridHelper.DeviceIoControl(fileStream.SafeFileHandle,
+                                          (uint)EIOControlCode.FsctlSetSparse,
+                                          IntPtr.Zero,
+                                          0,
+                                          IntPtr.Zero,
+                                          0,
+                                          out uint bs,
+                                          IntPtr.Zero);
+
             var memoryMappedFile = MemoryMappedFile.CreateFromFile(fileStream, null, totalSizeInBytes, MemoryMappedFileAccess.ReadWrite, HandleInheritability.None, false);
 
             MappableFileStream<T> mfs = new(fileStream, memoryMappedFile, blockSize, blockSizeInBytes, noOfBlocks);
@@ -159,7 +168,7 @@ namespace MappableFileStream
 
             return mfs;
         }
-
+             
         /// <summary>
         /// Creates a 
         /// </summary>

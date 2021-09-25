@@ -18,7 +18,7 @@ namespace MappableFileStream
         {
             int SizeX, SizeY;
 
-            SizeX = SizeY = 512;
+            SizeX = SizeY = 1024;
 
             var process = Process.GetCurrentProcess();
             process.MaxWorkingSet = (nint)(HybridHelper.GetOSMemory().ullAvailPhys * 0.5d);
