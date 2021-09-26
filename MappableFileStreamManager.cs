@@ -31,7 +31,7 @@ namespace MappableFileStream
         static IntPtr HiMemResourceHandle;
         static ulong MaxAvailableMemory;
 
-        internal static readonly ManualResetEventSlim FlushWaitHandle = new(true);
+    //    private static readonly ManualResetEventSlim FlushWaitHandle = new(true);
 
         internal static readonly ReaderWriterLockSlim FlushLock = new(LockRecursionPolicy.SupportsRecursion);
 
@@ -56,7 +56,11 @@ namespace MappableFileStream
 
         static Thread MemoryThread;
 
-        public static void FlushWait() => FlushWaitHandle.Wait();
+        /// <summary>
+        /// Wait until the memory manager allows access to the data.
+        /// </summary>
+        /// <returns></returns>
+        public static IDisposable WaitForDataAccess() => FlushLock.EnterRead();
 
         static MappableFileStreamManager()
         {
@@ -194,9 +198,9 @@ namespace MappableFileStream
             [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
             static bool TooManyBooklets()
             {
-                var items = GetStreams();
+                var (activeStreams, totalBookletCount) = GetStreams();
 
-                return items.totalBookletCount > MaxAllowedItems;
+                return totalBookletCount > MaxAllowedItems;
             }
 
             if (QueryMemoryResourceNotification(LoMemResourceHandle, out var state))
@@ -256,7 +260,7 @@ namespace MappableFileStream
                     (MappableFileStream[] activeStreams, int totalBookletCount) = GetStreams();
 
                     // Block the access to streams so that noone can currently allocate new memory.
-                    FlushWaitHandle.Reset();
+                    using var disallowedProcessingForOtherThreads = FlushLock.EnterWrite();
 
                     var booklets = ArrayPool<(MappableFileStream stream, Booklet booklet)>.Shared.Rent(totalBookletCount);
                     try
@@ -281,13 +285,14 @@ namespace MappableFileStream
                         Console.WriteLine($"{unmapWatch.Elapsed.TotalSeconds}s");
 
 
-                        Stopwatch flushWatch = Stopwatch.StartNew();
-                        Console.Write("Flushing: ");
-                        Parallel.ForEach(activeStreams, stream =>
-                        {
-                            stream.Flush();
-                        });
-                        Console.WriteLine($"{flushWatch.Elapsed.TotalSeconds}s");
+                        //Stopwatch flushWatch = Stopwatch.StartNew();
+                        //Console.Write("Flushing: ");
+                        //Parallel.ForEach(activeStreams, stream =>
+                        //{
+                        //    stream.Flush();
+                        //});
+
+                        //Console.WriteLine($"{flushWatch.Elapsed.TotalSeconds}s");
 
                         if (!HybridHelper.K32EmptyWorkingSet(Process.GetCurrentProcess().SafeHandle))
                         {
@@ -305,11 +310,45 @@ namespace MappableFileStream
             {
 
             }
-            finally
-            {
-                // Allow access to streams again.
-                FlushWaitHandle.Set();
-            }
+        }
+    }
+
+    static class ReaderWriterLockExtensions
+    {
+        public static IDisposable EnterWrite(this ReaderWriterLockSlim rw) => new ReaderWriterLock_WriteLock_Disposable(rw);
+
+        public static IDisposable EnterRead(this ReaderWriterLockSlim rw) => new ReaderWriterLock_ReadLock_Disposable(rw);
+    }
+
+    struct ReaderWriterLock_WriteLock_Disposable : IDisposable
+    {
+        private readonly ReaderWriterLockSlim RWLock;
+
+        public ReaderWriterLock_WriteLock_Disposable(ReaderWriterLockSlim rwLock)
+        {
+            RWLock = rwLock;
+            RWLock.EnterWriteLock();
+        }
+
+        public void Dispose()
+        {
+            RWLock.ExitWriteLock();
+        }
+    }
+
+    struct ReaderWriterLock_ReadLock_Disposable : IDisposable
+    {
+        private readonly ReaderWriterLockSlim RWLock;
+
+        public ReaderWriterLock_ReadLock_Disposable(ReaderWriterLockSlim rwLock)
+        {
+            RWLock = rwLock;
+            RWLock.EnterReadLock();
+        }
+
+        public void Dispose()
+        {
+            RWLock.ExitReadLock();
         }
     }
 }

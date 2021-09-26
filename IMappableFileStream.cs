@@ -61,6 +61,7 @@ namespace MappableFileStream
 
     public unsafe interface IReadOnlyMappableFileStream<T> : IReadOnlyMappableFileStream where T : unmanaged
     {
+        unsafe T* DangerousGetHandle(int blockNo);
     }
 
     public interface IMappableFileStream<T> : IReadOnlyMappableFileStream<T> where T : unmanaged

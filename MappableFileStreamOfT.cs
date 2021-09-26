@@ -26,7 +26,28 @@ namespace MappableFileStream
 
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveOptimization | MethodImplOptions.AggressiveInlining)]
-        private T* NonBlockingDangerousGetHandle(int blockNo) => (T*)StartAddress + checked(blockNo * (long)BlockSize);
+        private T* NonBlockingDangerousGetHandle(int blockNo)
+        {
+            var blockAddress = (T*)StartAddress + checked(blockNo * (long)BlockSize);
+            HybridHelper.VirtualUnlock((nint)blockAddress, BlockSizeInBytes);
+
+            return blockAddress;
+        }
+
+        /// <summary>
+        /// Return a pointer to the first element of the <paramref name="blockNo"/> block.
+        /// </summary>
+        /// <param name="blockNo"></param>
+        /// <returns></returns>
+        [SkipLocalsInit]
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        public  unsafe T* DangerousGetHandle(int blockNo) 
+        {
+            var blockAddress = (T*)DangerousGetHandle() + checked(blockNo * (long)BlockSize);
+            HybridHelper.VirtualUnlock((nint)blockAddress, BlockSizeInBytes);
+
+            return blockAddress;        
+        }
 
         /// <summary>
         /// Suggests the memory manager that the memory area can be paged if necessary.
@@ -55,6 +76,8 @@ namespace MappableFileStream
 
             // Unlock the address range.
             HybridHelper.VirtualUnlock((nint)blockAddress, BlockSizeInBytes * noOfBlocks);
+
+            HybridHelper.FlushViewOfFile((nint)blockAddress, BlockSizeInBytes * noOfBlocks);
 
             // Remove it from the booklet tracking.
             for (int i = startBlock; i < noOfBlocks; i++)

@@ -12,19 +12,17 @@ namespace MappableFileStream
     {
         static bool Cancel = false;
 
-     static    ConcurrentBag<int[]> items = new ();
-
         static async Task Main(string[] args)
         {
             int SizeX, SizeY;
 
-            SizeX = SizeY = 1024;
+            SizeX = SizeY = 2048;
 
             var process = Process.GetCurrentProcess();
-            process.MaxWorkingSet = (nint)(HybridHelper.GetOSMemory().ullAvailPhys * 0.5d);
+           process.MaxWorkingSet = (nint)(HybridHelper.GetOSMemory().ullAvailPhys * 0.5d);
             // process.MinWorkingSet = (nint)(HybridHelper.GetOSMemory().ullAvailPhys * 0.5d);
 
-            MappableFileStreamManager.SetMaxMemory((ulong)(HybridHelper.GetOSMemory().ullAvailPhys * 0.4d));
+           MappableFileStreamManager.SetMaxMemory((ulong)(HybridHelper.GetOSMemory().ullAvailPhys * 0.3d));
 
             Stopwatch stopWatch = new Stopwatch();
             stopWatch.Start();
@@ -77,12 +75,14 @@ namespace MappableFileStream
                 lastTime = nowTime;
 
                 process.Refresh();
-                MappableFileStreamManager.FlushWait();
-                Console.WriteLine(String.Format(headline,
-                    nowCount,
-                    process.WorkingSet64,
-                    HybridHelper.GetOSMemory().ullAvailPhys
-                    ));
+                using (MappableFileStreamManager.WaitForDataAccess())
+                {
+                    Console.WriteLine(String.Format(headline,
+                        nowCount,
+                        process.WorkingSet64,
+                        HybridHelper.GetOSMemory().ullAvailPhys
+                        ));
+                }
 
                 //-Items per s: { diff / diffTime.TotalSeconds} ({ HybridHelper.GetOSMemory().ullAvailPhys}) 
             }
@@ -118,11 +118,8 @@ namespace MappableFileStream
                 processor.Dispose();
             Console.WriteLine("Dispose: " + disposeWatch.Elapsed.TotalMilliseconds + "ms");
 
-
-
             TimeSpan ts = stopWatch.Elapsed;
             Console.WriteLine("RunTime: " + ts.TotalMilliseconds + "ms");
-
 
             Console.ForegroundColor = ConsoleColor.Red;
             Console.WriteLine("Finished");

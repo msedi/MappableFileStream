@@ -37,7 +37,7 @@ namespace MappableFileStream
 
             for (int i = 0; i < inputData.Length; i++)
             {
-                outputData[i] = inputData[i] + 10;
+                outputData[i] = inputData[i] + sliceIndex;
             }
             
             return outputData;

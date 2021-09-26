@@ -7,6 +7,9 @@ using System.Runtime.CompilerServices;
 
 namespace MappableFileStream
 {
+    /// <summary>
+    /// Abstract base class for streams that are backed by a storage (file) when the whole data does not fit into memory.
+    /// </summary>
     [DebuggerDisplay("{InternalStream.Name}")]
     public abstract class MappableFileStream : IDisposable
     {
@@ -15,8 +18,6 @@ namespace MappableFileStream
         readonly MemoryMappedViewAccessor ViewAccessor;
 
         protected readonly nint StartAddress;
-
-        readonly object SyncRoot = new();
 
         /// <summary>
         /// Creates a new instance of <see cref="MappableFileStream{T}"/>.
@@ -67,8 +68,10 @@ namespace MappableFileStream
         [MethodImpl(MethodImplOptions.AggressiveOptimization)]
         public IntPtr DangerousGetHandle()
         {
-            MappableFileStreamManager.FlushWaitHandle.Wait();
-            return StartAddress;
+            using (MappableFileStreamManager.WaitForDataAccess())
+            {
+                return StartAddress;
+            }
         }
 
         /// <summary>
@@ -101,7 +104,7 @@ namespace MappableFileStream
 
         #region IDisposable
 
-        public bool IsDisposed {  get; private set; }   
+        public bool IsDisposed { get; private set; }
 
         /// <summary>
         /// Disposes allocated unmanaged resources.
@@ -137,7 +140,7 @@ namespace MappableFileStream
         }
 
         /// <summary>
-        /// Creates a 
+        /// Creates a new instance of <see cref="IMappableFileStream"/>.
         /// </summary>
         /// <typeparam name="T"></typeparam>
         /// <param name="fileName"></param>
@@ -145,6 +148,20 @@ namespace MappableFileStream
         /// <param name="noOfBlocks"></param>
         /// <returns></returns>
         public static IMappableFileStream<T> CreateNew<T>(string fileName, int blockSize, int noOfBlocks) where T : unmanaged
+        {
+            return CreateNewShared<T>(fileName, null, blockSize, noOfBlocks);
+        }
+
+        /// <summary>
+        /// Creates a new instance of <see cref="IMappableFileStream"/> with a map name for shared access.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="fileName"></param>
+        /// <param name="mapName"></param>
+        /// <param name="blockSize"></param>
+        /// <param name="noOfBlocks"></param>
+        /// <returns></returns>
+        public static IMappableFileStream<T> CreateNewShared<T>(string fileName, string mapName, int blockSize, int noOfBlocks) where T : unmanaged
         {
             var (blockSizeInBytes, totalSizeInBytes) = GetSize<T>(blockSize, noOfBlocks);
 
@@ -161,16 +178,16 @@ namespace MappableFileStream
                                           out uint bs,
                                           IntPtr.Zero);
 
-            var memoryMappedFile = MemoryMappedFile.CreateFromFile(fileStream, null, totalSizeInBytes, MemoryMappedFileAccess.ReadWrite, HandleInheritability.None, false);
+            var memoryMappedFile = MemoryMappedFile.CreateFromFile(fileStream, mapName, totalSizeInBytes, MemoryMappedFileAccess.ReadWrite, HandleInheritability.None, false);
 
             MappableFileStream<T> mfs = new(fileStream, memoryMappedFile, blockSize, blockSizeInBytes, noOfBlocks);
             MappableFileStreamManager.AddStream(mfs);
 
             return mfs;
         }
-             
+
         /// <summary>
-        /// Creates a 
+        /// Creates a new readonly instance of <see cref="IReadOnlyMappableFileStream{T}"/>.
         /// </summary>
         /// <typeparam name="T"></typeparam>
         /// <param name="fileName"></param>
@@ -179,11 +196,24 @@ namespace MappableFileStream
         /// <returns></returns>
         public static IReadOnlyMappableFileStream<T> OpenRead<T>(string fileName, int blockSize, int noOfBlocks) where T : unmanaged
         {
+            return OpenReadShared<T>(fileName, null, blockSize, noOfBlocks);
+        }
+
+        /// <summary>
+        /// Creates a new readonly instance of <see cref="IReadOnlyMappableFileStream{T}"/> with a map name for shared access.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="fileName"></param>
+        /// <param name="blockSize"></param>
+        /// <param name="noOfBlocks"></param>
+        /// <returns></returns>
+        public static IReadOnlyMappableFileStream<T> OpenReadShared<T>(string fileName, string mapName, int blockSize, int noOfBlocks) where T : unmanaged
+        {
             var (blockSizeInBytes, _) = GetSize<T>(blockSize, noOfBlocks);
 
             var fileStream = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.Read, blockSize, FileOptions.RandomAccess);
 
-            var memoryMappedFile = MemoryMappedFile.CreateFromFile(fileStream, null, 0, MemoryMappedFileAccess.Read, HandleInheritability.None, false);
+            var memoryMappedFile = MemoryMappedFile.CreateFromFile(fileStream, mapName, 0, MemoryMappedFileAccess.Read, HandleInheritability.None, false);
 
             MappableFileStream<T> mfs = new(fileStream, memoryMappedFile, blockSize, blockSizeInBytes, noOfBlocks);
             MappableFileStreamManager.AddStream(mfs);

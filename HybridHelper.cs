@@ -89,7 +89,7 @@ namespace MappableFileStream
 
 
         [DllImport("kernel32.dll")]
-        static extern bool FlushViewOfFile(IntPtr lpBaseAddress, nint dwNumberOfBytesToFlush);
+        internal static extern bool FlushViewOfFile(IntPtr lpBaseAddress, nint dwNumberOfBytesToFlush);
 
 
 

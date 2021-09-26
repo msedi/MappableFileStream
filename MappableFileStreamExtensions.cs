@@ -17,14 +17,6 @@ namespace MappableFileStream
             data.CopyTo(stream.GetWriteHandle(blockNo));
         }
 
-        /// <summary>
-        /// Return a pointer to the first element of the <paramref name="blockNo"/> block.
-        /// </summary>
-        /// <param name="blockNo"></param>
-        /// <returns></returns>
-        [SkipLocalsInit]
-        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-        public static unsafe T* DangerousGetHandle<T>(this IReadOnlyMappableFileStream<T> stream, int blockNo) where T : unmanaged => (T*)stream.DangerousGetHandle() + checked(blockNo * (long)stream.BlockSize);
 
         /// <summary>
         /// Request a writeable structure for the given <paramref name="blockNo"/>.
