@@ -29,9 +29,6 @@ namespace MappableFileStream
 
         static IntPtr LoMemResourceHandle;
         static IntPtr HiMemResourceHandle;
-        static ulong MaxAvailableMemory;
-
-    //    private static readonly ManualResetEventSlim FlushWaitHandle = new(true);
 
         internal static readonly ReaderWriterLockSlim FlushLock = new(LockRecursionPolicy.SupportsRecursion);
 
@@ -66,7 +63,8 @@ namespace MappableFileStream
         {
             // Get the current memory situation. This reflects the current situation and is seen as an upper boundary
             // when the management starts. 
-            MaxAvailableMemoryOnStartup = MaxAvailableMemory = GetOSMemory().ullAvailPhys;
+            MaxAvailableMemoryOnStartup = GetOSMemory().ullAvailPhys;
+            Process.GetCurrentProcess().MaxWorkingSet = (nint)(MaxAvailableMemoryOnStartup * 0.95d);
 
             AppDomain.CurrentDomain.ProcessExit += CurrentDomain_ProcessExit;
 
@@ -75,7 +73,7 @@ namespace MappableFileStream
 
             // This is the threshold that is used to get active with paging
             // and unmapping when the current memory siutation reaches this threshold.
-            LowerOSMemoryThreshold = (ulong)(MaxAvailableMemory * LowerOSMemoryPercentage);
+            LowerOSMemoryThreshold = (ulong)(MaxAvailableMemoryOnStartup * LowerOSMemoryPercentage);
         }
 
         /// <summary>
@@ -105,12 +103,14 @@ namespace MappableFileStream
         /// <param name="allowedMaximumMemory">Sets the allowed memory in bytes.</param>
         public static void SetMaxMemory(ulong allowedMaximumMemory)
         {
-            if (allowedMaximumMemory != default)
-                MaxAvailableMemory = Math.Min(MaxAvailableMemoryOnStartup, allowedMaximumMemory);
-            else
-                MaxAvailableMemory = MaxAvailableMemoryOnStartup;
+            var process = Process.GetCurrentProcess();
 
-            Console.WriteLine($"Maximum Allowed Memory: {MaxAvailableMemory}");
+            if (allowedMaximumMemory != default)
+                process.MaxWorkingSet = (nint)Math.Min(MaxAvailableMemoryOnStartup, allowedMaximumMemory);
+            else
+                process.MaxWorkingSet = (nint)MaxAvailableMemoryOnStartup;
+
+            Console.WriteLine($"Maximum Allowed Memory: {process.MaxWorkingSet}");
 
             AdjustMemoryLimits();
         }
@@ -127,8 +127,9 @@ namespace MappableFileStream
             if (!Streams.Any())
                 return;
 
+            var process = Process.GetCurrentProcess();
             var memoryInfo = Streams.Select(x => x.Key.GetMemoryInfo()).ToArray();
-            var possibleMemory = MaxAvailableMemory - LowerOSMemoryThreshold;
+            var possibleMemory = (long)process.MaxWorkingSet - (long)process.MinWorkingSet;
 
             var averageBlockSize = memoryInfo.Average(x => x.BlockSizeInBytes);
             MaxAllowedItems = (int)Math.Floor(possibleMemory / averageBlockSize);

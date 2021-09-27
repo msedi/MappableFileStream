@@ -19,7 +19,8 @@ namespace MappableFileStream
             SizeX = SizeY = 2048;
 
             var process = Process.GetCurrentProcess();
-           process.MaxWorkingSet = (nint)(HybridHelper.GetOSMemory().ullAvailPhys * 0.5d);
+            var max= (nint)(HybridHelper.GetOSMemory().ullAvailPhys * 0.5d);
+            process.MaxWorkingSet = (nint)(HybridHelper.GetOSMemory().ullAvailPhys * 0.5d);
             // process.MinWorkingSet = (nint)(HybridHelper.GetOSMemory().ullAvailPhys * 0.5d);
 
            MappableFileStreamManager.SetMaxMemory((ulong)(HybridHelper.GetOSMemory().ullAvailPhys * 0.3d));
@@ -80,7 +81,7 @@ namespace MappableFileStream
                     Console.WriteLine(String.Format(headline,
                         nowCount,
                         process.WorkingSet64,
-                        HybridHelper.GetOSMemory().ullAvailPhys
+                        (long)process.MaxWorkingSet
                         ));
                 }
 

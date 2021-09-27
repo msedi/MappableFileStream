@@ -29,7 +29,7 @@ namespace MappableFileStream
         private T* NonBlockingDangerousGetHandle(int blockNo)
         {
             var blockAddress = (T*)StartAddress + checked(blockNo * (long)BlockSize);
-            HybridHelper.VirtualUnlock((nint)blockAddress, BlockSizeInBytes);
+          //  HybridHelper.VirtualUnlock((nint)blockAddress, BlockSizeInBytes);
 
             return blockAddress;
         }
@@ -44,7 +44,7 @@ namespace MappableFileStream
         public  unsafe T* DangerousGetHandle(int blockNo) 
         {
             var blockAddress = (T*)DangerousGetHandle() + checked(blockNo * (long)BlockSize);
-            HybridHelper.VirtualUnlock((nint)blockAddress, BlockSizeInBytes);
+            //HybridHelper.VirtualUnlock((nint)blockAddress, BlockSizeInBytes);
 
             return blockAddress;        
         }
@@ -59,7 +59,7 @@ namespace MappableFileStream
             var blockAddress = NonBlockingDangerousGetHandle(blockNo);
 
             // Unlock the address range.
-            var unlockResult = HybridHelper.VirtualUnlock((nint)blockAddress, BlockSizeInBytes);
+            var unlockResult = HybridHelper.VirtualUnlock(blockAddress, BlockSizeInBytes);
 
             // Remove it from the booklet tracking.
             InternalStore.TryRemove(blockNo, out _);
