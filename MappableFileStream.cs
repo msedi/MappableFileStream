@@ -99,7 +99,8 @@ namespace MappableFileStream
 
         public void Flush()
         {
-            ViewAccessor.Flush();
+            //ViewAccessor.Flush();
+            HybridHelper.FlushFileBuffers(this.InternalStream.SafeFileHandle);
         }
 
         #region IDisposable

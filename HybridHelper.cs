@@ -92,6 +92,10 @@ namespace MappableFileStream
         internal static extern bool FlushViewOfFile(IntPtr lpBaseAddress, nint dwNumberOfBytesToFlush);
 
 
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool FlushFileBuffers(SafeFileHandle hFile);
+
 
         [SuppressUnmanagedCodeSecurity]
         [SuppressGCTransition]

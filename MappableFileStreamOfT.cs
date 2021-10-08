@@ -59,7 +59,8 @@ namespace MappableFileStream
             var blockAddress = NonBlockingDangerousGetHandle(blockNo);
 
             // Unlock the address range.
-            var unlockResult = HybridHelper.VirtualUnlock(blockAddress, BlockSizeInBytes);
+            //var unlockResult = HybridHelper.VirtualUnlock((nint)blockAddress, BlockSizeInBytes);
+            HybridHelper.FlushViewOfFile((nint)blockAddress, BlockSizeInBytes);
 
             // Remove it from the booklet tracking.
             InternalStore.TryRemove(blockNo, out _);
@@ -75,12 +76,12 @@ namespace MappableFileStream
             var blockAddress = NonBlockingDangerousGetHandle(startBlock);
 
             // Unlock the address range.
-            HybridHelper.VirtualUnlock((nint)blockAddress, BlockSizeInBytes * noOfBlocks);
+            //HybridHelper.VirtualUnlock((nint)blockAddress, BlockSizeInBytes * noOfBlocks);
 
             HybridHelper.FlushViewOfFile((nint)blockAddress, BlockSizeInBytes * noOfBlocks);
 
             // Remove it from the booklet tracking.
-            for (int i = startBlock; i < noOfBlocks; i++)
+            for (int i = startBlock; i < startBlock + noOfBlocks; i++)
                 InternalStore.TryRemove(i, out _);
         }
 
@@ -113,7 +114,7 @@ namespace MappableFileStream
             HybridHelper.DiscardVirtualMemory((nint)blockAddress, BlockSizeInBytes * noOfBlocks);
 
             // Remove it from the booklet tracking.
-            for (int i = startBlock; i < noOfBlocks; i++)
+            for (int i = startBlock; i < startBlock + noOfBlocks; i++)
                 InternalStore.TryRemove(i, out _);
         }
     }

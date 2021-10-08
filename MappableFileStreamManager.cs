@@ -263,27 +263,72 @@ namespace MappableFileStream
                     // Block the access to streams so that noone can currently allocate new memory.
                     using var disallowedProcessingForOtherThreads = FlushLock.EnterWrite();
 
-                    var booklets = ArrayPool<(MappableFileStream stream, Booklet booklet)>.Shared.Rent(totalBookletCount);
                     try
                     {
-                        int bookletIndex = 0;
+                        Stopwatch unmapWatch = Stopwatch.StartNew();
+                        Console.Write($"Unmapping");
+
+                        Dictionary<MappableFileStream, List<ValueTuple<int, int>>> streamlets = new();
+
                         foreach (var stream in activeStreams)
                         {
-                            foreach (var booklet in stream.InternalStore.Values)
+                            if (!stream.InternalStore.Values.Any())
+                                continue;
+
+
+                            var bookletList = stream.InternalStore.Values.OrderBy(x => x.Index).ThenBy(x => x.LastAccess);
+
+                            int NextIndex = bookletList.First().Index;
+
+
+                            List<ValueTuple<int, int>> booklets = new();
+                            ValueTuple<int, int> currentRange = new (NextIndex, NextIndex);
+
+                            foreach (var booklet in bookletList)
                             {
-                                booklets[bookletIndex++] = (stream, booklet);
+                                if (booklet.Index == NextIndex)
+                                {
+                                    currentRange = new (currentRange.Item1, booklet.Index);
+                                    NextIndex++;
+                                }
+                                else
+                                {
+                                    booklets.Add(currentRange);
+
+                                    currentRange = new (booklet.Index, booklet.Index);
+
+                                    NextIndex = booklet.Index + 1;
+                                }
                             }
+
+                            streamlets.Add(stream, booklets);
                         }
 
-                        var items = booklets.Take(totalBookletCount).OrderByDescending(x => x.booklet.LastAccess).ThenByDescending(x => x.booklet.AccessCount);
-
-                        Stopwatch unmapWatch = Stopwatch.StartNew();
-                        Console.Write("Unmapping: ");
-                        foreach (var (stream, booklet) in items)
+                        foreach (var key in streamlets)
                         {
-                            stream.Unmap(booklet.Index);
+                            foreach (var section in key.Value)
+                            {
+                                key.Key.UnmapRange(section.Item1, section.Item2 - section.Item1 + 1);
+                            }
+
+                            key.Key.Flush();
                         }
-                        Console.WriteLine($"{unmapWatch.Elapsed.TotalSeconds}s");
+
+                         Console.WriteLine($"{unmapWatch.Elapsed.TotalSeconds}s");
+
+
+                        // int i = 0;
+                        // foreach (var (stream, booklet) in items)
+                        // {
+                        ////     stream.Unmap(booklet.Index);
+                        //     i++;
+
+                        //     Console.WriteLine(i);
+                        // }
+                        // Console.WriteLine($"{unmapWatch.Elapsed.TotalSeconds}s");
+
+                        // foreach (var stream in activeStreams)
+                        //     stream.Flush();
 
 
                         //Stopwatch flushWatch = Stopwatch.StartNew();
@@ -302,7 +347,6 @@ namespace MappableFileStream
                     }
                     finally
                     {
-                        ArrayPool<(MappableFileStream stream, Booklet booklet)>.Shared.Return(booklets, true);
                     }
                 }
                 while (true);
