@@ -86,6 +86,9 @@ namespace MappableFileStream
             HighMemoryResourceNotification = 1,
         }
 
+        [DllImport("kernel32.dll")]
+        static extern uint GetWriteWatch(uint dwFlags, nint lpBaseAddress, nuint dwRegionSize, out nint lpAddresses, ref nuint lpdwCount, out uint lpdwGranularity);
+
 
 
         [DllImport("kernel32.dll")]
