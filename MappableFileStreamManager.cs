@@ -74,6 +74,11 @@ namespace MappableFileStream
             // This is the threshold that is used to get active with paging
             // and unmapping when the current memory siutation reaches this threshold.
             LowerOSMemoryThreshold = (ulong)(MaxAvailableMemoryOnStartup * LowerOSMemoryPercentage);
+
+            if (!HybridHelper.InitializeProcessForWsWatch(Process.GetCurrentProcess().SafeHandle))
+            {
+                Console.WriteLine(Marshal.GetLastWin32Error());
+            }
         }
 
         /// <summary>
@@ -248,12 +253,36 @@ namespace MappableFileStream
             }
         }
 
-        private static void CleanupMappableStreams()
+        private unsafe static void CleanupMappableStreams()
         {
             try
             {
+
+            //https://gist.github.com/bitshifter/c87aa396446bbebeab29
                 do
                 {
+                    (MappableFileStream[] st, int tbc) = GetStreams();
+
+                    foreach (var stream in st)
+                    {
+                        var handle = stream.DangerousGetHandle();
+
+nint * outAddr = stackalloc nint[100];
+                        uint ctr = 100;
+
+                        HybridHelper.ResetWriteWatch(handle, 1000000);
+                        var res = HybridHelper.GetWriteWatch(WriteWatchFlags.NoReset, handle, 1000000, outAddr, ref ctr, out uint gran);
+                        if (res != 0)
+                        {
+                            var error = Marshal.GetLastWin32Error();
+                            Console.WriteLine(error);
+                        }
+
+                    }
+
+
+
+
                     // Escape the cleanup if memory resources are enough.
                     if (!IsMemoryLo() && IsMemoryHi()) return;
 

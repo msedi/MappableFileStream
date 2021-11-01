@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,6 +15,12 @@ namespace MappableFileStream
 
         static async Task Main(string[] args)
         {
+            using (var s = File.Create("D:\\test.dat"))
+            {
+                FileMapping.CreateFileMapping(s.Handle, IntPtr.Zero, FileMapProtection.PageReadWrite | )
+            }
+
+
             int SizeX, SizeY;
 
             SizeX = SizeY = 2048;

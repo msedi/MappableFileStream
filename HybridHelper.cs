@@ -52,18 +52,12 @@ namespace MappableFileStream
         [SuppressUnmanagedCodeSecurity]
         [SuppressGCTransition]
         [DllImport("kernel32.dll", SetLastError = true)]
-        internal static extern bool  SetProcessWorkingSetSizeEx(
-  SafeProcessHandle hProcess,
-  nint dwMinimumWorkingSetSize,
-  nint dwMaximumWorkingSetSize,
-  QUOTA_LIMITS_HARDWS Flags
-);
+        internal static extern bool SetProcessWorkingSetSizeEx(SafeProcessHandle hProcess, nint dwMinimumWorkingSetSize, nint dwMaximumWorkingSetSize, QUOTA_LIMITS_HARDWS Flags);
 
         [SuppressUnmanagedCodeSecurity]
         [SuppressGCTransition]
         [DllImport("kernel32.dll", SetLastError = true)]
         internal static extern bool K32EmptyWorkingSet(SafeProcessHandle hProcess);
-
 
         [SuppressUnmanagedCodeSecurity]
         [SuppressGCTransition]
@@ -87,11 +81,6 @@ namespace MappableFileStream
         }
 
         [DllImport("kernel32.dll")]
-        static extern uint GetWriteWatch(uint dwFlags, nint lpBaseAddress, nuint dwRegionSize, out nint lpAddresses, ref nuint lpdwCount, out uint lpdwGranularity);
-
-
-
-        [DllImport("kernel32.dll")]
         internal static extern bool FlushViewOfFile(IntPtr lpBaseAddress, nint dwNumberOfBytesToFlush);
 
 
@@ -102,7 +91,7 @@ namespace MappableFileStream
 
         [SuppressUnmanagedCodeSecurity]
         [SuppressGCTransition]
-        [DllImport("kernel32")] 
+        [DllImport("kernel32")]
         internal static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
 
 
@@ -111,7 +100,7 @@ namespace MappableFileStream
 
         [SuppressUnmanagedCodeSecurity]
         [SuppressGCTransition]
-        [DllImport("kernel32")] 
+        [DllImport("kernel32")]
         private static extern bool SetFileValidData(SafeFileHandle handle, long validDataLength);
 
 
@@ -165,6 +154,34 @@ namespace MappableFileStream
 
         [DllImport("psapi.dll", SetLastError = true)]
         internal static extern bool GetProcessMemoryInfo(SafeProcessHandle hProcess, out PROCESS_MEMORY_COUNTERS counters, uint size);
+
+        #region Write Watches
+
+
+        [DllImport("kernel32.dll")]
+        public static extern unsafe uint GetWriteWatch(WriteWatchFlags dwFlags, nint lpBaseAddress, nuint dwRegionSize, IntPtr* lpAddresses, ref uint lpdwCount, out uint lpdwGranularity);
+        //public static extern uint GetWriteWatch(WRITE_WATCH dwFlags, [In] IntPtr lpBaseAddress, SizeT dwRegionSize, out IntPtr lpAddresses, ref UIntPtr lpdwCount, [Out] out uint lpdwGranularity);
+
+
+        [DllImport("kernel32.dll")]
+        public static extern uint ResetWriteWatch(nint lpBaseAddress, nint dwRegionSize);
+
+        #endregion
+
+
+        /// <summary>
+        /// Initiates monitoring of the working set of the specified process.You must call this function before calling the GetWsChanges function.    
+        /// </summary>
+        /// <param name="hProcess"></param>
+        /// <returns></returns>
+        [DllImport("psapi.dll")]
+        public static extern bool InitializeProcessForWsWatch(SafeProcessHandle handle);
+    }
+
+    public enum WriteWatchFlags : uint
+    {
+        NoReset=0,
+        Reset=1
     }
 
 
@@ -182,7 +199,7 @@ namespace MappableFileStream
     }
 
     [StructLayout(LayoutKind.Sequential, Size = 72)]
-     struct PROCESS_MEMORY_COUNTERS
+    struct PROCESS_MEMORY_COUNTERS
     {
         public uint cb;
         public uint PageFaultCount;
