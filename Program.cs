@@ -1,11 +1,14 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+
+using UndocumentedWindows;
 
 namespace MappableFileStream
 {
@@ -15,10 +18,10 @@ namespace MappableFileStream
 
         static async Task Main(string[] args)
         {
-            using (var s = File.Create("D:\\test.dat"))
-            {
-                FileMapping.CreateFileMapping(s.Handle, IntPtr.Zero, FileMapProtection.PageReadWrite | )
-            }
+            var result = Undocumented.Memory.SetSystemMemoryListInformation(SYSTEM_MEMORY_LIST_COMMAND.MemoryEmptyWorkingSets);
+            if (result != 0)
+                throw new Win32Exception((int)result);
+
 
 
             int SizeX, SizeY;

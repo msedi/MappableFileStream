@@ -12,4 +12,8 @@
 	  <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.1.506-beta" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\UndocumentedWindows\UndocumentedWindows.csproj" />
+  </ItemGroup>
+
 </Project>

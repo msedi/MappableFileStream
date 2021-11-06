@@ -257,32 +257,8 @@ namespace MappableFileStream
         {
             try
             {
-
-            //https://gist.github.com/bitshifter/c87aa396446bbebeab29
                 do
                 {
-                    (MappableFileStream[] st, int tbc) = GetStreams();
-
-                    foreach (var stream in st)
-                    {
-                        var handle = stream.DangerousGetHandle();
-
-nint * outAddr = stackalloc nint[100];
-                        uint ctr = 100;
-
-                        HybridHelper.ResetWriteWatch(handle, 1000000);
-                        var res = HybridHelper.GetWriteWatch(WriteWatchFlags.NoReset, handle, 1000000, outAddr, ref ctr, out uint gran);
-                        if (res != 0)
-                        {
-                            var error = Marshal.GetLastWin32Error();
-                            Console.WriteLine(error);
-                        }
-
-                    }
-
-
-
-
                     // Escape the cleanup if memory resources are enough.
                     if (!IsMemoryLo() && IsMemoryHi()) return;
 
