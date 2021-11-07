@@ -18,13 +18,7 @@ namespace MappableFileStream
 
         static async Task Main(string[] args)
         {
-            var result = Undocumented.Memory.SetSystemMemoryListInformation(SYSTEM_MEMORY_LIST_COMMAND.MemoryEmptyWorkingSets);
-            if (result != 0)
-                throw new Win32Exception((int)result);
-
-
-
-            int SizeX, SizeY;
+                      int SizeX, SizeY;
 
             SizeX = SizeY = 2048;
 
@@ -90,7 +84,7 @@ namespace MappableFileStream
                 {
                     Console.WriteLine(String.Format(headline,
                         nowCount,
-                        process.WorkingSet64,
+                        HybridHelper.GetOSMemory().ullAvailPhys,//process.WorkingSet64,
                         (long)process.MaxWorkingSet
                         ));
                 }

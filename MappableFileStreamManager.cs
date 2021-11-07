@@ -345,10 +345,10 @@ namespace MappableFileStream
 
                         //Console.WriteLine($"{flushWatch.Elapsed.TotalSeconds}s");
 
-                        if (!HybridHelper.K32EmptyWorkingSet(Process.GetCurrentProcess().SafeHandle))
-                        {
-                            Console.WriteLine($"EmptyWorkingSet filed an error: {Marshal.GetLastWin32Error()}");
-                        }
+                        //if (!HybridHelper.K32EmptyWorkingSet(Process.GetCurrentProcess().SafeHandle))
+                        //{
+                        //    Console.WriteLine($"EmptyWorkingSet filed an error: {Marshal.GetLastWin32Error()}");
+                        //}
                     }
                     finally
                     {
